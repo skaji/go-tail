@@ -30,26 +30,24 @@ func NewConfig(path string) *Config {
 func Run(ctx context.Context, config *Config) <-chan string {
 	ch := make(chan string)
 	f := &file{
-		path:       config.Path,
-		file:       nil,
-		buf:        make([]byte, 0, 64*1024),
-		bufLen:     0,
-		logger:     config.Logger,
-		readLength: config.ReadLength,
-		tick:       config.Tick,
+		buffer: make([]byte, 0, 64*1024),
+		file:   nil,
+		logger: config.Logger,
+		path:   config.Path,
+		tick:   config.Tick,
+		tmp:    make([]byte, config.ReadLength),
 	}
 	go f.run(ctx, ch)
 	return ch
 }
 
 type file struct {
-	path       string
-	file       *os.File
-	buf        []byte
-	bufLen     int
-	logger     Logger
-	readLength int
-	tick       time.Duration
+	buffer []byte
+	file   *os.File
+	logger Logger
+	path   string
+	tick   time.Duration
+	tmp    []byte
 }
 
 func (f *file) run(ctx context.Context, ch chan<- string) {
@@ -91,10 +89,6 @@ TOPLOOP:
 }
 
 func (f *file) read() error {
-	if i := bytes.IndexByte(f.buf, lineFeed); i != -1 {
-		return nil
-	}
-
 	if f.file == nil {
 		file, err := os.Open(f.path)
 		if err != nil {
@@ -102,20 +96,19 @@ func (f *file) read() error {
 		}
 		f.file = file
 	}
-	b := make([]byte, f.readLength)
-	n, err := f.file.Read(b)
+	n, err := f.file.Read(f.tmp)
 	if err != nil {
 		return err
 	}
-	f.buf = append(f.buf, b[:n]...)
+	f.buffer = append(f.buffer, f.tmp[:n]...)
 	return nil
 }
 
 func (f *file) nextLine() ([]byte, error) {
 	for {
-		if i := bytes.IndexByte(f.buf, lineFeed); i != -1 {
-			b := f.buf[:i+1]
-			f.buf = f.buf[i+1:]
+		if i := bytes.IndexByte(f.buffer, lineFeed); i != -1 {
+			b := f.buffer[:i+1]
+			f.buffer = f.buffer[i+1:]
 			return b, nil
 		} else if err := f.read(); err != nil {
 			return nil, err
